@@ -3,14 +3,7 @@ name: Test
 on:
   push:
     branches:
-      - main
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - ".github/workflows/*.yml"
-  pull_request:
-    types: [opened, synchronize, reopened]
+      - dev
     paths:
       - "**/*.go"
       - "go.mod"
