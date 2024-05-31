@@ -28,6 +28,7 @@ import (
 	feature_inbound "github.com/xtls/xray-core/features/inbound"
 	"github.com/xtls/xray-core/features/policy"
 	"github.com/xtls/xray-core/features/routing"
+	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/proxy"
 	"github.com/xtls/xray-core/proxy/vless"
 	"github.com/xtls/xray-core/proxy/vless/encoding"
@@ -53,6 +54,7 @@ func init() {
 type Handler struct {
 	inboundHandlerManager feature_inbound.Manager
 	policyManager         policy.Manager
+	stats                 stats.Manager
 	validator             *vless.Validator
 	dns                   dns.Client
 	fallbacks             map[string]map[string]map[string]*Fallback // or nil
@@ -65,6 +67,7 @@ func New(ctx context.Context, config *Config, dc dns.Client) (*Handler, error) {
 	handler := &Handler{
 		inboundHandlerManager: v.GetFeature(feature_inbound.ManagerType()).(feature_inbound.Manager),
 		policyManager:         v.GetFeature(policy.ManagerType()).(policy.Manager),
+		stats:                 v.GetFeature(stats.ManagerType()).(stats.Manager),
 		validator:             new(vless.Validator),
 		dns:                   dc,
 	}
@@ -162,12 +165,39 @@ func (h *Handler) Close() error {
 
 // AddUser implements proxy.UserManager.AddUser().
 func (h *Handler) AddUser(ctx context.Context, u *protocol.MemoryUser) error {
-	return h.validator.Add(u)
+	if err := h.validator.Add(u); err != nil {
+		return err
+	}
+	if h.stats == nil {
+		return nil
+	}
+	p := h.policyManager.ForLevel(u.Level)
+	// Validator has stricter case checking, so if it succeeds, RegisterCounter will not fail.
+	if p.Stats.UserUplink {
+		// the name refers to app.dispatcher[default.go]:getLink()
+		st_up_name := "user>>>" + u.Email + ">>>traffic>>>uplink"
+		h.stats.RegisterCounter(st_up_name)
+	}
+	if p.Stats.UserDownlink {
+		st_down_name := "user>>>" + u.Email + ">>>traffic>>>downlink"
+		h.stats.RegisterCounter(st_down_name)
+	}
+	return nil
 }
 
 // RemoveUser implements proxy.UserManager.RemoveUser().
 func (h *Handler) RemoveUser(ctx context.Context, e string) error {
-	return h.validator.Del(e)
+	if err := h.validator.Del(e); err != nil {
+		return err
+	}
+	if h.stats == nil {
+		return nil
+	}
+	st_up_name := "user>>>" + e + ">>>traffic>>>uplink"
+	st_down_name := "user>>>" + e + ">>>traffic>>>downlink"
+	h.stats.UnregisterCounter(st_up_name)
+	h.stats.UnregisterCounter(st_down_name)
+	return nil
 }
 
 // Network implements proxy.Inbound.Network().
